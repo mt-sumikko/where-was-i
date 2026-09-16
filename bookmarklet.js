@@ -94,13 +94,25 @@
   const mainText = extractMainText(fullText, 20);
   const url = location.origin + location.pathname + location.search + '#:~:text=' + encodeURIComponent(mainText);
 
+  // クリップボードコピーに加えて、対応環境ではOS標準の共有シートも開く。
+  // iOSの共有シートには「メモに追加」が標準搭載されているので、
+  // タップ一発でメモアプリに保存できる(キャンセルしてもコピー自体は残る)。
+  function tryShare() {
+    if (navigator.share) {
+      navigator.share({ title: 'しおり: ' + mainText, url: url }).catch(function () {});
+    }
+  }
+
   if (navigator.clipboard && navigator.clipboard.writeText) {
     navigator.clipboard.writeText(url).then(function () {
       showToast('しおりをコピーしました: 「' + mainText + '」');
+      tryShare();
     }).catch(function () {
       window.prompt('自動コピーに失敗しました。手動でコピーしてください:', url);
+      tryShare();
     });
   } else {
     window.prompt('しおりURL(手動でコピーしてください):', url);
+    tryShare();
   }
 })();
