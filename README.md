@@ -22,6 +22,28 @@ python3 -m http.server 8000
 
 **重要:** `file://` で直接開くと「しおりを開く」が機能しない（後述）。必ずHTTPサーバー経由で開くこと。
 
+## ブックマークレット版（任意のWebページで使う）
+
+`index.html` はこのリポジトリの中のページ専用（`#article` 配下だけを見る）だが、**`bookmarklet.js` は任意のWebページ上で「しおりを挟む」を実行できるブックマークレット版**。実際に読んでいるニュースサイトやブログの記事で試すにはこちらを使う。
+
+やること自体は同じ（ビューポート内で一番上に見えるテキストを取得→句読点区切りで切り詰め→`#:~:text=` URLを組み立て）だが、保存先が `localStorage` ではなく**クリップボードへの自動コピー**になっている（他人のページに自分の`localStorage`を書き込むわけにはいかないので）。「しおりを開く」側はブックマークレット不要で、コピーされたURLをそのまま開けばよい（NFCタグに書き込む・メモに貼る・自分に送る、など）。
+
+### 登録方法
+
+1. `bookmarklet.js` の中身をコピーし、ブラウザで開発者コンソール等を使って圧縮する必要はない。以下の圧縮済みコードをそのまま使う：
+
+```
+javascript:(function(){function normalize(text){return text.replace(/\s+/g,' ').trim();}function extractMainText(fullText,maxLength){const slice = fullText.slice(0,maxLength);const lastPunct = Math.max(slice.lastIndexOf('。'),slice.lastIndexOf('、'),slice.lastIndexOf('！'),slice.lastIndexOf('？'),slice.lastIndexOf('.'),slice.lastIndexOf(','));if(lastPunct >= 3)return slice.slice(0,lastPunct + 1);return slice;}function isHidden(el){if(!el)return false;const style = getComputedStyle(el);return style.display === 'none' || style.visibility === 'hidden' || parseFloat(style.opacity)=== 0;}function findTopVisibleTextNode(){const walker = document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT,{acceptNode(node){if(!node.textContent || !normalize(node.textContent))return NodeFilter.FILTER_REJECT;const parent = node.parentElement;if(!parent)return NodeFilter.FILTER_REJECT;const tag = parent.tagName;if(tag === 'SCRIPT' || tag === 'STYLE' || tag === 'NOSCRIPT')return NodeFilter.FILTER_REJECT;if(isHidden(parent))return NodeFilter.FILTER_REJECT;return NodeFilter.FILTER_ACCEPT;}});let best = null;let bestTop = Infinity;let node;while((node = walker.nextNode())){const range = document.createRange();range.selectNodeContents(node);const rects = range.getClientRects();for(const rect of rects){if(rect.height > 0 && rect.bottom > 0 && rect.top < window.innerHeight){if(rect.top < bestTop){bestTop = rect.top;best = node;}break;}}}return best;}function showToast(msg,isError){const el = document.createElement('div');el.textContent = msg;el.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);' + 'background:' +(isError ? '#dc2626':'#111827')+ ';color:#fff;' + 'padding:10px 16px;border-radius:8px;font-size:14px;line-height:1.5;' + 'z-index:2147483647;box-shadow:0 4px 16px rgba(0,0,0,.35);' + 'max-width:min(90vw,480px);word-break:break-all;font-family:sans-serif;';document.body.appendChild(el);setTimeout(function(){el.remove();},4000);}const node = findTopVisibleTextNode();if(!node){showToast('しおり:ビューポート内にテキストが見つかりませんでした',true);return;}const fullText = normalize(node.textContent);const mainText = extractMainText(fullText,20);const url = location.origin + location.pathname + location.search + '#:~:text=' + encodeURIComponent(mainText);if(navigator.clipboard && navigator.clipboard.writeText){navigator.clipboard.writeText(url).then(function(){showToast('しおりをコピーしました:「' + mainText + '」');}).catch(function(){window.prompt('自動コピーに失敗しました。手動でコピーしてください:',url);});}else{window.prompt('しおりURL(手動でコピーしてください):',url);}})();
+```
+
+2. **Mac (Safari/Chrome)**: 適当なページをブックマークに追加 → ブックマーク編集画面を開き、URL欄を上記の `javascript:...` に丸ごと置き換える → 名前を「しおりを挟む」などにしておく。
+3. **iPhone Safari**: 同様にまず普通にブックマークを1つ追加 → ブックマーク一覧の編集モードでそのブックマークを開き、URL欄を `javascript:...` に置き換える。
+4. 実際に読みたいページを開いた状態で、ブックマークバー（またはブックマーク一覧）からこれを実行すると、画面下に「しおりをコピーしました: 「〇〇〇」」とトースト表示が出て、text fragment URLがクリップボードに入る。
+
+### ダミーニュースサイトでの検証
+
+`index.html` とは全く違うDOM構造（ヘッダー・ナビ・サイドバー広告・広告差し込みのある記事本文）を持つダミーのニュースサイト風ページを別途用意し、Playwrightでブックマークレットを注入して検証した。ヘッダーやサイドバー広告のテキストを誤って拾うことなく、記事本文中のビューポート最上部のテキストを正しく抽出し、クリップボードへのコピー、そのURLでのジャンプ＆ハイライトまで問題なく機能することを確認済み。
+
 ---
 
 ## 検証結果
