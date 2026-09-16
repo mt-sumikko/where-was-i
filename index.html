@@ -176,6 +176,9 @@
       </select>
     </label>
     <label><input type="checkbox" id="opt-context"> 前後の文脈も含める</label>
+    <label>NFCタグ容量目安:
+      <input type="number" id="opt-capacity" value="137" min="20" max="9999" style="width:56px;"> バイト
+    </label>
   </div>
   <div class="row">
     <button id="btn-save">📍 しおりを挟む</button>
@@ -190,6 +193,7 @@
   const debugEl = document.getElementById('debug');
   const lengthSelect = document.getElementById('opt-length');
   const contextCheckbox = document.getElementById('opt-context');
+  const capacityInput = document.getElementById('opt-capacity');
 
   function normalize(text) {
     return text.replace(/\s+/g, ' ').trim();
@@ -254,43 +258,78 @@
     return { node: best, prevNode: bestPrevNode };
   }
 
+  // NFCタグの実効容量(バイト)を考慮し、指定文字数で作ったURLが収まらなければ
+  // 「前後文脈オフ」→「文字数を1文字ずつ削る」の順に自動で縮めて容量内に収める。
   function buildTextFragmentUrl() {
     const { node, prevNode } = findTopVisibleTextNode();
     if (!node) return null;
 
-    const mainLength = parseInt(lengthSelect.value, 10);
-    const useContext = contextCheckbox.checked;
+    const requestedLength = parseInt(lengthSelect.value, 10);
+    const requestedContext = contextCheckbox.checked;
+    const capacity = parseInt(capacityInput.value, 10) || Infinity;
 
     const fullText = normalize(node.textContent);
-    const mainText = extractMainText(fullText, mainLength);
-    if (!mainText) return null;
+    const prefixSource = prevNode ? normalize(prevNode.textContent) : '';
 
-    let fragment;
-    if (useContext) {
-      const suffix = fullText.slice(mainText.length, mainText.length + 15);
-      const prefixSource = prevNode ? normalize(prevNode.textContent) : '';
-      const prefix = prefixSource.slice(-15);
+    function build(len, useContext) {
+      const mainText = extractMainText(fullText, len);
+      if (!mainText) return null;
 
-      const parts = [];
-      if (prefix) parts.push(encodeURIComponent(prefix) + '-');
-      parts.push(encodeURIComponent(mainText));
-      if (suffix) parts.push('-' + encodeURIComponent(suffix));
-      fragment = parts.join(',');
-    } else {
-      fragment = encodeURIComponent(mainText);
+      let fragment;
+      let prefix = null;
+      let suffix = null;
+      if (useContext) {
+        suffix = fullText.slice(mainText.length, mainText.length + 15);
+        prefix = prefixSource.slice(-15);
+        const parts = [];
+        if (prefix) parts.push(encodeURIComponent(prefix) + '-');
+        parts.push(encodeURIComponent(mainText));
+        if (suffix) parts.push('-' + encodeURIComponent(suffix));
+        fragment = parts.join(',');
+      } else {
+        fragment = encodeURIComponent(mainText);
+      }
+
+      const url = location.origin + location.pathname + '#:~:text=' + fragment;
+      const bytes = new TextEncoder().encode(url).length;
+      return { url, mainText, prefix: useContext ? prefix : null, suffix: useContext ? suffix : null, bytes };
     }
 
-    const url = location.origin + location.pathname + '#:~:text=' + fragment;
-    return { url, mainText, prefix: useContext ? (prevNode ? normalize(prevNode.textContent).slice(-15) : '') : null, suffix: useContext ? fullText.slice(mainText.length, mainText.length + 15) : null };
+    let result = build(requestedLength, requestedContext);
+    let adjusted = false;
+
+    if (result && result.bytes > capacity && requestedContext) {
+      result = build(requestedLength, false);
+      adjusted = true;
+    }
+
+    let len = requestedLength;
+    while (result && result.bytes > capacity && len > 1) {
+      len -= 1;
+      result = build(len, false);
+      adjusted = true;
+    }
+
+    if (result) {
+      result.adjusted = adjusted;
+      result.overCapacity = result.bytes > capacity;
+      result.capacity = capacity;
+    }
+    return result;
   }
 
   function renderDebug(result, savedUrl) {
     if (result) {
+      const capacityLine = '<br><strong>URLサイズ:</strong> ' + result.bytes + ' / ' + result.capacity + ' バイト' +
+        (result.overCapacity
+          ? ' <span style="color:#dc2626;">⚠ 容量オーバー(これ以上は縮められません)</span>'
+          : (result.adjusted ? ' <span style="color:#d97706;">(容量に合わせて自動調整済み)</span>' : ' OK'));
       debugEl.innerHTML =
         '<strong>抽出テキスト:</strong> "' + result.mainText + '"' +
         (result.prefix || result.suffix
           ? '<br><strong>前後文脈:</strong> prefix="' + (result.prefix || '') + '" / suffix="' + (result.suffix || '') + '"'
           : '') +
+        capacityLine +
         '<br><strong>保存URL:</strong> <a href="' + result.url + '">' + result.url + '</a>';
     } else if (savedUrl) {
       debugEl.innerHTML = '<strong>保存済みしおり:</strong> <a href="' + savedUrl + '">' + savedUrl + '</a>';
