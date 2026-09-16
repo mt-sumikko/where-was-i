@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>where was i — text fragment しおりプロトタイプ</title>
+<style>
+  :root {
+    --accent: #2563eb;
+    --bg: #fafafa;
+    --text: #1f2937;
+    --muted: #6b7280;
+    --border: #e5e7eb;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Yu Gothic", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.9;
+    margin: 0;
+    padding: 0 0 160px 0;
+  }
+  header {
+    padding: 48px 20px 24px;
+    max-width: 680px;
+    margin: 0 auto;
+  }
+  header h1 { font-size: 28px; margin: 0 0 8px; }
+  header p { color: var(--muted); margin: 0; }
+  article {
+    max-width: 680px;
+    margin: 0 auto;
+    padding: 0 20px;
+    font-size: 17px;
+  }
+  article h2 {
+    font-size: 20px;
+    margin-top: 40px;
+    border-left: 4px solid var(--accent);
+    padding-left: 10px;
+  }
+  article p { margin: 0 0 20px; }
+
+  /* text fragment のネイティブハイライト（ブラウザ標準の疑似要素） */
+  ::target-text {
+    background: #ffe58f;
+  }
+
+  /* 固定UI */
+  #bookmark-ui {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(255,255,255,0.97);
+    border-top: 1px solid var(--border);
+    padding: 12px 16px;
+    backdrop-filter: blur(6px);
+    z-index: 1000;
+  }
+  #bookmark-ui .row {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    max-width: 680px;
+    margin: 0 auto 8px;
+    flex-wrap: wrap;
+  }
+  #bookmark-ui button {
+    flex: 1;
+    min-width: 140px;
+    padding: 12px 16px;
+    font-size: 15px;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: 600;
+  }
+  #btn-save { background: var(--accent); color: white; }
+  #btn-open { background: #16a34a; color: white; }
+  #bookmark-ui button:active { opacity: 0.8; }
+
+  .options {
+    display: flex;
+    gap: 14px;
+    align-items: center;
+    max-width: 680px;
+    margin: 0 auto 8px;
+    font-size: 13px;
+    color: var(--muted);
+    flex-wrap: wrap;
+  }
+  .options label { display: flex; align-items: center; gap: 4px; }
+  .options select { font-size: 13px; }
+
+  #debug {
+    max-width: 680px;
+    margin: 0 auto;
+    font-size: 12px;
+    color: var(--muted);
+    word-break: break-all;
+    max-height: 90px;
+    overflow-y: auto;
+    background: #f3f4f6;
+    border-radius: 6px;
+    padding: 8px 10px;
+  }
+  #debug strong { color: var(--text); }
+  #debug a { color: var(--accent); }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>読書の途中経過について（検証用ダミー記事）</h1>
+  <p>この記事は text fragment を使ったしおり機能を検証するためのダミーコンテンツです。スクロールして好きな位置で「しおりを挟む」を押してみてください。</p>
+</header>
+
+<article id="article">
+
+<p>ある日ふと、長い記事を読んでいる途中でタブを閉じてしまい、続きがどこだったか分からなくなった経験は誰にでもあるはずだ。スクロールバーの位置はなんとなく覚えていても、いざ戻ってみると同じような見た目の段落が並んでいて、結局最初から読み直す羽目になる。こうした小さなストレスは積み重なると、長文コンテンツを読むこと自体への腰の重さにつながっていく。</p>
+
+<p>ブラウザの「戻る」機能やスクロール位置の復元は、あくまでページ全体に対するものであり、テキストの意味的な位置を覚えているわけではない。広告が挿入されたり、レイアウトが変わったりすれば、ピクセル単位のスクロール位置はまったく意味をなさなくなる。ここで必要になるのは、ピクセルではなく「どの文章を読んでいたか」という内容ベースの記憶の仕組みだ。</p>
+
+<h2>Text Fragment という仕組み</h2>
+
+<p>近年のブラウザには、URLのハッシュに <code>#:~:text=</code> という特殊な記法を付け加えることで、指定した文字列をページ内から検索し、その位置までスクロールしてハイライト表示する機能が実装されている。これは Text Fragments と呼ばれる仕様で、もともとは検索エンジンの結果から特定の一文へ直接ジャンプするために設計されたものだ。</p>
+
+<p>この仕組みが優れているのは、DOMの構造や要素のIDに依存しないという点にある。見出しのidや目次のアンカーがなくても、記事中の任意の文字列さえ分かれば、その場所へ正確にジャンプできる。つまり、ページを表示した瞬間に「今どこを読んでいたか」というテキストの断片さえ記録しておけば、あとはブラウザ標準の機能だけで元の位置に戻れるということになる。</p>
+
+<p>この性質は、NFCタグのようなハードウェアと組み合わせたときに特に有効だと考えられる。タグにタッチした瞬間にJavaScriptを実行し、画面内の先頭テキストを取得してURLを組み立てるだけで、あとの「正確な位置への復帰」はブラウザに任せられるからだ。サーバー側で複雑な状態管理をする必要がない、という軽量さも大きな魅力である。</p>
+
+<h2>しおりを挟むという操作の設計</h2>
+
+<p>今回のプロトタイプでは、NFCタグへのタッチを模したボタンとして「しおりを挟む」を画面下部に固定表示している。このボタンを押すと、現在ビューポートの中で一番上に見えているテキストノードを走査によって探し出し、その冒頭部分を使ってURLを組み立てる、という処理が走る。</p>
+
+<p>「一番上に見えているテキスト」を判定する処理は単純に見えて、意外と考慮すべき点が多い。見出しなのか本文なのか、画面に一部しかかかっていない要素をどう扱うか、固定表示されているボタン自体のテキストを誤って拾わないようにするにはどうするか、といった細部の設計が、実際の使い勝手を大きく左右する。</p>
+
+<p>また、抽出した文字列をどのくらいの長さで使うかも重要な論点だ。短すぎれば記事中の別の場所に同じ文字列が存在してしまい、誤った位置にジャンプしてしまう可能性がある。逆に長すぎると、広告の挿入やちょっとした文言修正によって完全一致しなくなり、ハイライトが失敗するリスクが高まる。このトレードオフを実際に体感するために、このプロトタイプでは使用する文字数を切り替えられるようにしてある。</p>
+
+<h2>マッチング精度という現実的な課題</h2>
+
+<p>Text Fragments の仕様では、単純な文字列一致だけでなく、前後の文脈を指定する記法も用意されている。ハイフンで区切ったプレフィックスとサフィックスを付け加えることで、「この文字列の前にこういう文章があり、後にこういう文章が続く場所」という、より厳密な指定が可能になる。</p>
+
+<p>この前後文脈を含める指定は、同じフレーズがページ内に複数回登場するような記事では特に効果を発揮する。たとえばこの記事のように「しおり」という単語が何度も出てくる文章では、単語だけを指定すると意図しない箇所にジャンプしてしまう危険がある一方、前後の文脈まで含めればその危険はかなり減らせる。</p>
+
+<p>ただし前後文脈を含めるということは、それだけURLが長くなり、また前後の文章がわずかでも変化した場合にマッチが失敗しやすくなるということでもある。精度と頑健性は単純にトレードオフの関係にあり、どちらが正解というものではなく、コンテンツの性質に応じて選ぶべきパラメータだと言える。</p>
+
+<h2>動的に変化するページへの耐性</h2>
+
+<p>実際のニュースサイトやブログでは、記事本文の合間に広告が動的に挿入されたり、関連記事へのリンクが後から追加されたりすることが珍しくない。こうした変化はDOMの構造やスクロール位置を大きく変えてしまうが、Text Fragments はあくまで「表示されているテキストの内容」に基づいてマッチングを行うため、この種のレイアウト変化には本質的に強い。</p>
+
+<p>一方で、テキストの内容そのものが変わってしまうケースには弱い。たとえば記事の冒頭に広告主導の一文が動的に挿し込まれる、あるいはA/Bテストによって書き出しの文言が変わる、といった場合には、保存しておいたテキストがそもそもページ上に存在しなくなるため、マッチングは失敗する。この場合ブラウザは通常のアンカー遷移と同様にページの先頭を表示するだけになり、静かに機能が失敗する点には注意が必要だ。</p>
+
+<p>また、無限スクロールで記事が後から読み込まれるようなページでは、目的のテキストがまだDOMに存在しない状態でブラウザがマッチングを試みることになり、失敗する可能性が高い。このようなページで本機能を使う場合は、目的のテキストが読み込まれるまで先に処理を待つといった追加の工夫が必要になるだろう。</p>
+
+<h2>NFC実機への展開を見据えて</h2>
+
+<p>このプロトタイプではボタンのクリックでNFCタッチの代わりとしているが、中核となるロジックは「現在の読書位置を表すテキストを取得し、URLを組み立て、どこかに保存する」という部分に集約されている。この部分さえNFCのタッチイベントから同じように呼び出せれば、ハードウェアの違いを吸収した形で同じ体験を提供できるはずだ。</p>
+
+<p>実機での運用を考えると、保存先をlocalStorageからサーバーやNFCタグ自体の書き込み領域に置き換える、複数の記事をまたいでしおりを管理できるようにする、といった拡張が考えられる。ただし、それらはあくまで保存先の話であり、「今どこを読んでいるかをテキストとして特定し、URLフラグメントに変換する」というコアのロジックには手を入れる必要がない、という点がこの検証における一番の収穫だと言えるだろう。</p>
+
+<p>この記事はここでいったん終わりとなる。ページを再読み込みしたり、上のボタンを操作したりしながら、実際にどのくらいの精度でしおりの位置に戻れるかを試してみてほしい。</p>
+
+</article>
+
+<div id="bookmark-ui">
+  <div class="options">
+    <label>最大文字数:
+      <select id="opt-length">
+        <option value="10">10文字</option>
+        <option value="15" selected>15文字</option>
+        <option value="20">20文字</option>
+        <option value="30">30文字</option>
+      </select>
+    </label>
+    <label><input type="checkbox" id="opt-context"> 前後の文脈も含める</label>
+  </div>
+  <div class="row">
+    <button id="btn-save">📍 しおりを挟む</button>
+    <button id="btn-open">📖 しおりを開く</button>
+  </div>
+  <div id="debug">保存されたしおりはまだありません。</div>
+</div>
+
+<script>
+(function () {
+  const STORAGE_KEY = 'where-was-i:bookmark-url';
+  const debugEl = document.getElementById('debug');
+  const lengthSelect = document.getElementById('opt-length');
+  const contextCheckbox = document.getElementById('opt-context');
+
+  function normalize(text) {
+    return text.replace(/\s+/g, ' ').trim();
+  }
+
+  // maxLength文字までの範囲で、句読点(、。！？)の直後まで切り詰める。
+  // 単純な文字数カットだと助詞や活用語の途中で切れてしまい、
+  // ブラウザ側のtext fragmentマッチングが「単語境界にならない」として
+  // 失敗するケースが多いことが実機検証で判明したための調整。
+  function extractMainText(fullText, maxLength) {
+    const slice = fullText.slice(0, maxLength);
+    const lastPunct = Math.max(
+      slice.lastIndexOf('。'), slice.lastIndexOf('、'),
+      slice.lastIndexOf('！'), slice.lastIndexOf('？')
+    );
+    if (lastPunct >= 3) {
+      return slice.slice(0, lastPunct + 1);
+    }
+    return slice;
+  }
+
+  // ビューポート内で一番上に見えているテキストノードと、その直前の可視テキストノードを探す
+  function findTopVisibleTextNode() {
+    const walker = document.createTreeWalker(
+      document.getElementById('article'),
+      NodeFilter.SHOW_TEXT,
+      {
+        acceptNode(node) {
+          if (!node.textContent || !normalize(node.textContent)) {
+            return NodeFilter.FILTER_REJECT;
+          }
+          return NodeFilter.FILTER_ACCEPT;
+        }
+      }
+    );
+
+    let best = null;
+    let bestTop = Infinity;
+    let prevNode = null;
+    let bestPrevNode = null;
+    let node;
+
+    while ((node = walker.nextNode())) {
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      const rects = range.getClientRects();
+      let visibleRect = null;
+      for (const rect of rects) {
+        if (rect.height > 0 && rect.bottom > 0 && rect.top < window.innerHeight) {
+          visibleRect = rect;
+          break;
+        }
+      }
+      if (visibleRect && visibleRect.top < bestTop) {
+        bestTop = visibleRect.top;
+        best = node;
+        bestPrevNode = prevNode;
+      }
+      prevNode = node;
+    }
+
+    return { node: best, prevNode: bestPrevNode };
+  }
+
+  function buildTextFragmentUrl() {
+    const { node, prevNode } = findTopVisibleTextNode();
+    if (!node) return null;
+
+    const mainLength = parseInt(lengthSelect.value, 10);
+    const useContext = contextCheckbox.checked;
+
+    const fullText = normalize(node.textContent);
+    const mainText = extractMainText(fullText, mainLength);
+    if (!mainText) return null;
+
+    let fragment;
+    if (useContext) {
+      const suffix = fullText.slice(mainText.length, mainText.length + 15);
+      const prefixSource = prevNode ? normalize(prevNode.textContent) : '';
+      const prefix = prefixSource.slice(-15);
+
+      const parts = [];
+      if (prefix) parts.push(encodeURIComponent(prefix) + '-');
+      parts.push(encodeURIComponent(mainText));
+      if (suffix) parts.push('-' + encodeURIComponent(suffix));
+      fragment = parts.join(',');
+    } else {
+      fragment = encodeURIComponent(mainText);
+    }
+
+    const url = location.origin + location.pathname + '#:~:text=' + fragment;
+    return { url, mainText, prefix: useContext ? (prevNode ? normalize(prevNode.textContent).slice(-15) : '') : null, suffix: useContext ? fullText.slice(mainText.length, mainText.length + 15) : null };
+  }
+
+  function renderDebug(result, savedUrl) {
+    if (result) {
+      debugEl.innerHTML =
+        '<strong>抽出テキスト:</strong> "' + result.mainText + '"' +
+        (result.prefix || result.suffix
+          ? '<br><strong>前後文脈:</strong> prefix="' + (result.prefix || '') + '" / suffix="' + (result.suffix || '') + '"'
+          : '') +
+        '<br><strong>保存URL:</strong> <a href="' + result.url + '">' + result.url + '</a>';
+    } else if (savedUrl) {
+      debugEl.innerHTML = '<strong>保存済みしおり:</strong> <a href="' + savedUrl + '">' + savedUrl + '</a>';
+    } else {
+      debugEl.textContent = '保存されたしおりはまだありません。';
+    }
+  }
+
+  document.getElementById('btn-save').addEventListener('click', function () {
+    const result = buildTextFragmentUrl();
+    if (!result) {
+      debugEl.textContent = 'ビューポート内にテキストが見つかりませんでした。';
+      return;
+    }
+    localStorage.setItem(STORAGE_KEY, result.url);
+    renderDebug(result);
+  });
+
+  document.getElementById('btn-open').addEventListener('click', function () {
+    const savedUrl = localStorage.getItem(STORAGE_KEY);
+    if (!savedUrl) {
+      debugEl.textContent = 'しおりが保存されていません。先に「しおりを挟む」を押してください。';
+      return;
+    }
+    location.href = savedUrl;
+  });
+
+  // 初期表示: 保存済みのしおりがあれば表示しておく
+  const saved = localStorage.getItem(STORAGE_KEY);
+  renderDebug(null, saved);
+})();
+</script>
+
+</body>
+</html>
