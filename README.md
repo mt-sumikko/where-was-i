@@ -26,39 +26,64 @@ python3 -m http.server 8000
 
 `index.html` はこのリポジトリの中のページ専用（`#article` 配下だけを見る）だが、**`bookmarklet.js` は任意のWebページ上で「しおりを挟む」を実行できるブックマークレット版**。実際に読んでいるニュースサイトやブログの記事で試すにはこちらを使う。
 
-やること自体は同じ（ビューポート内で一番上に見えるテキストを取得→句読点区切りで切り詰め→`#:~:text=` URLを組み立て）だが、保存先が `localStorage` ではなく**クリップボードへの自動コピー**になっている（他人のページに自分の`localStorage`を書き込むわけにはいかないので）。加えて、対応環境（iOS Safariなど）では**`navigator.share()`でOS標準の共有シートも自動で開く**。iOSの共有シートには「メモに追加」が標準搭載されているので、共有シート→メモをタップするだけでそのままメモアプリに保存できる（キャンセルしてもクリップボードコピー自体は残る）。「しおりを開く」側はブックマークレット不要で、保存したURLをそのまま開けばよい（NFCタグに書き込む・メモから開く・自分に送る、など）。
+やること自体は同じ（ビューポート内で一番上に見えるテキストを取得→句読点区切りで切り詰め→`#:~:text=` URLを組み立て）だが、保存先が `localStorage` ではなく**クリップボードへの自動コピー**になっている（他人のページに自分の`localStorage`を書き込むわけにはいかないので）。コピー直後、`shortcuts://run-shortcut?name=しおりメモ保存` というURLスキームで**iOSショートカット「しおりメモ保存」を自動起動**し、クリップボードの中身を決まったメモに無言で追記する（詳細は後述の「iOSショートカット版」を参照）。「しおりを開く」側はブックマークレット不要で、保存したURLをそのまま開けばよい（NFCタグに書き込む・メモから開く・自分に送る、など）。
 
 ### 登録方法
 
 1. `bookmarklet.js` の中身をコピーし、ブラウザで開発者コンソール等を使って圧縮する必要はない。以下の圧縮済みコードをそのまま使う：
 
 ```
-javascript:(function(){function normalize(text){return text.replace(/\s+/g,' ').trim();}function extractMainText(fullText,maxLength){const slice = fullText.slice(0,maxLength);const lastPunct = Math.max(slice.lastIndexOf('。'),slice.lastIndexOf('、'),slice.lastIndexOf('！'),slice.lastIndexOf('？'),slice.lastIndexOf('.'),slice.lastIndexOf(','));if(lastPunct >= 3)return slice.slice(0,lastPunct + 1);return slice;}function isHidden(el){if(!el)return false;const style = getComputedStyle(el);return style.display === 'none' || style.visibility === 'hidden' || parseFloat(style.opacity)=== 0;}function findTopVisibleTextNode(){const walker = document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT,{acceptNode(node){if(!node.textContent || !normalize(node.textContent))return NodeFilter.FILTER_REJECT;const parent = node.parentElement;if(!parent)return NodeFilter.FILTER_REJECT;const tag = parent.tagName;if(tag === 'SCRIPT' || tag === 'STYLE' || tag === 'NOSCRIPT')return NodeFilter.FILTER_REJECT;if(isHidden(parent))return NodeFilter.FILTER_REJECT;return NodeFilter.FILTER_ACCEPT;}});let best = null;let bestTop = Infinity;let node;while((node = walker.nextNode())){const range = document.createRange();range.selectNodeContents(node);const rects = range.getClientRects();for(const rect of rects){if(rect.height > 0 && rect.bottom > 0 && rect.top < window.innerHeight){if(rect.top < bestTop){bestTop = rect.top;best = node;}break;}}}return best;}function showToast(msg,isError){const el = document.createElement('div');el.textContent = msg;el.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);' + 'background:' +(isError ? '#dc2626':'#111827')+ ';color:#fff;' + 'padding:10px 16px;border-radius:8px;font-size:14px;line-height:1.5;' + 'z-index:2147483647;box-shadow:0 4px 16px rgba(0,0,0,.35);' + 'max-width:min(90vw,480px);word-break:break-all;font-family:sans-serif;';document.body.appendChild(el);setTimeout(function(){el.remove();},4000);}const node = findTopVisibleTextNode();if(!node){showToast('しおり:ビューポート内にテキストが見つかりませんでした',true);return;}const fullText = normalize(node.textContent);const mainText = extractMainText(fullText,20);const url = location.origin + location.pathname + location.search + '#:~:text=' + encodeURIComponent(mainText);function tryShare(){if(navigator.share){navigator.share({title:'しおり:' + mainText,url:url}).catch(function(){});}}if(navigator.clipboard && navigator.clipboard.writeText){navigator.clipboard.writeText(url).then(function(){showToast('しおりをコピーしました:「' + mainText + '」');tryShare();}).catch(function(){window.prompt('自動コピーに失敗しました。手動でコピーしてください:',url);tryShare();});}else{window.prompt('しおりURL(手動でコピーしてください):',url);tryShare();}})();
+javascript:(function(){function normalize(text){return text.replace(/\s+/g,' ').trim();}function extractMainText(fullText,maxLength){const slice = fullText.slice(0,maxLength);const lastPunct = Math.max(slice.lastIndexOf('。'),slice.lastIndexOf('、'),slice.lastIndexOf('！'),slice.lastIndexOf('？'),slice.lastIndexOf('.'),slice.lastIndexOf(','));if(lastPunct >= 3)return slice.slice(0,lastPunct + 1);return slice;}function isHidden(el){if(!el)return false;const style = getComputedStyle(el);return style.display === 'none' || style.visibility === 'hidden' || parseFloat(style.opacity)=== 0;}function findTopVisibleTextNode(){const walker = document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT,{acceptNode(node){if(!node.textContent || !normalize(node.textContent))return NodeFilter.FILTER_REJECT;const parent = node.parentElement;if(!parent)return NodeFilter.FILTER_REJECT;const tag = parent.tagName;if(tag === 'SCRIPT' || tag === 'STYLE' || tag === 'NOSCRIPT')return NodeFilter.FILTER_REJECT;if(isHidden(parent))return NodeFilter.FILTER_REJECT;return NodeFilter.FILTER_ACCEPT;}});let best = null;let bestTop = Infinity;let node;while((node = walker.nextNode())){const range = document.createRange();range.selectNodeContents(node);const rects = range.getClientRects();for(const rect of rects){if(rect.height > 0 && rect.bottom > 0 && rect.top < window.innerHeight){if(rect.top < bestTop){bestTop = rect.top;best = node;}break;}}}return best;}function showToast(msg,isError){const el = document.createElement('div');el.textContent = msg;el.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);' + 'background:' +(isError ? '#dc2626':'#111827')+ ';color:#fff;' + 'padding:10px 16px;border-radius:8px;font-size:14px;line-height:1.5;' + 'z-index:2147483647;box-shadow:0 4px 16px rgba(0,0,0,.35);' + 'max-width:min(90vw,480px);word-break:break-all;font-family:sans-serif;';document.body.appendChild(el);setTimeout(function(){el.remove();},4000);}const node = findTopVisibleTextNode();if(!node){showToast('しおり:ビューポート内にテキストが見つかりませんでした',true);return;}const fullText = normalize(node.textContent);const mainText = extractMainText(fullText,20);const url = location.origin + location.pathname + location.search + '#:~:text=' + encodeURIComponent(mainText);var SHORTCUT_NAME = 'しおりメモ保存';function runShortcut(){location.href = 'shortcuts://run-shortcut?name=' + encodeURIComponent(SHORTCUT_NAME);}if(navigator.clipboard && navigator.clipboard.writeText){navigator.clipboard.writeText(url).then(function(){showToast('しおりをコピーしました:「' + mainText + '」');runShortcut();}).catch(function(){window.prompt('自動コピーに失敗しました。手動でコピーしてください:',url);});}else{window.prompt('しおりURL(手動でコピーしてください):',url);}})();
 ```
 
 2. **Mac (Safari/Chrome)**: 適当なページをブックマークに追加 → ブックマーク編集画面を開き、URL欄を上記の `javascript:...` に丸ごと置き換える → 名前を「しおりを挟む」などにしておく。
 3. **iPhone Safari**: 同様にまず普通にブックマークを1つ追加 → ブックマーク一覧の編集モードでそのブックマークを開き、URL欄を `javascript:...` に置き換える。
-4. 実際に読みたいページを開いた状態で、ブックマークバー（またはブックマーク一覧）からこれを実行すると、画面下に「しおりをコピーしました: 「〇〇〇」」とトースト表示が出て、text fragment URLがクリップボードに入る。対応環境ではそのままOS標準の共有シートも開く（iOSなら「メモに追加」をタップすればメモアプリに保存できる）。
+4. あらかじめ後述の「iOSショートカット版」の手順で、ショートカット「しおりメモ保存」を作っておく。
+5. 実際に読みたいページを開いた状態で、ブックマークバー（またはブックマーク一覧）からこれを実行すると、画面下に「しおりをコピーしました: 「〇〇〇」」とトースト表示が出てtext fragment URLがクリップボードに入り、続けて自動でショートカットアプリが起動してメモに追記される。
 
 ### ダミーニュースサイトでの検証
 
-`index.html` とは全く違うDOM構造（ヘッダー・ナビ・サイドバー広告・広告差し込みのある記事本文）を持つダミーのニュースサイト風ページを別途用意し、Playwrightでブックマークレットを注入して検証した。ヘッダーやサイドバー広告のテキストを誤って拾うことなく、記事本文中のビューポート最上部のテキストを正しく抽出し、クリップボードへのコピー、そのURLでのジャンプ＆ハイライトまで問題なく機能することを確認済み。`navigator.share()` 呼び出し（title/urlの中身）もモックして正しく渡っていることを確認した（実際のOS共有シートの見た目まではheadless環境では検証できないため、そこはユーザー側での実機確認が必要）。
+`index.html` とは全く違うDOM構造（ヘッダー・ナビ・サイドバー広告・広告差し込みのある記事本文）を持つダミーのニュースサイト風ページを別途用意し、Playwrightでブックマークレットを注入して検証した。ヘッダーやサイドバー広告のテキストを誤って拾うことなく、記事本文中のビューポート最上部のテキストを正しく抽出し、クリップボードへのコピーまでは問題なく機能することを確認済み（`shortcuts://` へのカスタムスキーム遷移自体はheadless環境では検証できないため、そこから先はユーザー側での実機確認が必要）。
 
 ## iOSショートカット版（共有シートを経由せず特定のメモへ自動保存）
 
 共有シートは結局「保存先を毎回選ぶ」手間が残り、普通の記事共有と体験が変わらない。**決まった1つのメモに無言で追記したい場合は、ブックマークレットではなくiOSショートカットに主導権を渡すのが確実。**
 
-`shortcut-script.js` は、ショートカットの「Webページで実行」(Run JavaScript on Web Page) アクションに貼る専用版。ロジックは`bookmarklet.js`と同じだが、クリップボードや共有シートを使わず、生成したURLを `completion(url)` でショートカットの次のアクションにそのまま渡す。
+### 実機検証で判明した重大な制約：「Webページで JavaScript を実行」が機能しないケースがある
 
-### ショートカットの組み方
+当初、`shortcut-script.js`（ショートカットの「Webページで実行」= Run JavaScript on Web Page アクションに貼り、`completion(url)` で結果を次のアクションに渡す版）で1つのショートカットに完結させる設計を試みた。手順としては：
 
-1. ショートカットアプリで新規ショートカットを作成
-2. アクション「現在のWebページを取得」(Get Current Webpage from Safari) を追加（起動元によっては不要な場合もある。共有シート経由なら「Safariのページを受け取る」設定でOK）
-3. アクション「Webページで実行」(Run JavaScript on Web Page) を追加し、`shortcut-script.js` の中身をそのまま貼り付け
-4. アクション「メモに追加」(Add to Note) を追加し、**対象メモをあらかじめ固定で指定**（例:「しおりメモ」という名前のメモを1つ作っておいて、毎回そこを指定する）。前のステップの出力(URL文字列)を追記内容として渡す
-5. ショートカットの名前を「しおりを挟む」などにして保存
+1. 「現在のWebページを取得」or 共有シート経由で「Webページ」を受け取る
+2. 「Webページで JavaScript を実行」に `shortcut-script.js` を貼る
+3. 出力を「メモに追加」に渡す
 
-これで、ショートカットを実行した瞬間に共有シートを経由せず、常に同じメモにURLが追記されるようになる。`completion()` に正しくURLが渡ることはPlaywright（`completion`をモック）で確認済み。実際のショートカットアプリでの組み立て・メモへの追記自体はiPhone実機での確認が必要。
+という3ステップ構成。ロジック自体はPlaywright（`completion`をモック）で正しく動くことを確認済みだったが、**ユーザーの実機(iPhone)では「Webページで JavaScript を実行」の出力(`JavaScriptの結果`)が常に空になり、機能しなかった**。切り分けた内容：
+
+- 背面タップ／ショートカットアプリから直接実行／共有シートからの実行、**3つの起動経路すべてで失敗**。
+- `completion('テスト成功');` のような最小のコードに置き換えても失敗（クォート変換などコピペ起因の構文エラーではない）。
+- 一方、同じ「Webページ」オブジェクトから **`Get Details of Safari Web Page`（Safari Webページの詳細を取得）でURLを取るのは問題なく成功した**。通知にもメモにも正しいURLが渡った。
+- つまり「Webページ」オブジェクト自体は生きているのに、**「Webページで JavaScript を実行」というアクションだけが常に空を返す**、という状態。SafariのJavaScript設定はオン、機能拡張の設定にも該当項目なし。原因はこのiPhone固有の環境（地域設定・制限プロファイル・iOSバージョンなど）である可能性が高いが、特定には至らなかった。
+
+**この不具合が特定の環境固有なのか、より広く起こりうるのかを事前に切り分ける手段がなかったため、「Webページで JavaScript を実行」に依存しない設計に切り替えた。** `shortcut-script.js` と、この節の以前の手順は「うまくいかなかった記録」として残しておく（同じアクションで同様の問題に当たった場合の参考用）。
+
+### 採用した方式：ブックマークレット + クリップボード経由の2アクションだけのショートカット
+
+`bookmarklet.js` 側でSafari上で直接JavaScriptを実行してtext fragment URLを生成し、クリップボードにコピー。その直後、`shortcuts://run-shortcut?name=...` というURLスキームで、Safari拡張機能を一切使わない**超シンプルな別のショートカット「しおりメモ保存」を自動起動**する。この方式なら「Webページで JavaScript を実行」を一切使わないため、上記の不具合を回避できる。
+
+#### 1. ショートカット「しおりメモ保存」を作る
+
+Safari関連のアクションは一切使わない、以下の2アクションだけ：
+
+1. 「**クリップボードの内容を取得**」
+2. 「**メモに追加**」— 入力に手順1の出力（クリップボードの内容）を渡し、**対象メモをあらかじめ固定で指定**（例:「Web しおり Where was i」）
+
+ショートカット名は必ず「**しおりメモ保存**」にする（`bookmarklet.js` 内の `SHORTCUT_NAME` 定数と一致させる必要がある。名前を変える場合は両方を合わせて変更する）。
+
+#### 2. `bookmarklet.js` の動き
+
+`bookmarklet.js` は、クリップボードコピーに成功した直後、`location.href = 'shortcuts://run-shortcut?name=' + encodeURIComponent(SHORTCUT_NAME)` でショートカットアプリを自動起動する。ユーザー操作としては、ブックマークレットを1回タップするだけで、あとは自動的にショートカットが起動してメモに追記される想定（環境によっては初回に外部アプリを開く確認ダイアログが挟まる可能性がある）。
+
+`shortcuts://` への遷移自体はカスタムURLスキームなのでheadless環境では検証できないが、その手前のクリップボードコピー部分はPlaywrightで動作確認済み。実際に`shortcuts://`遷移でショートカットが起動し、メモに追記されるところまではiPhone実機での確認が必要。
 
 ### NFCタグが手元にない時のトリガー代替手段
 
@@ -128,7 +153,7 @@ NFC実機運用では、タグを読んだ瞬間にOSがブラウザを新規に
 
 - Safariは macOS Ventura / iOS 16.1（2022年秋）以降でText Fragmentsの基本的なサポートが入っているとされる。
 - Chromeに比べて仕様準拠度・安定性で後れを取っているという報告もあるが、デフォルト設定（15文字・句読点区切り）での基本動作では特に問題は見られなかった。前後文脈オプションなど細かい設定の組み合わせまでは未確認。
-- iOS Safari（iPhone実機）は今回未確認。macOS SafariとiOS Safariで挙動が異なる可能性はゼロではないため、もし触る機会があれば別途確認しておきたい。
+- iOS Safari（iPhone実機）は、GitHub Pagesで公開したページに対してユーザーが実機確認済み。しおりを挟む→開くの一連の流れ、および広告挿入・NFCタグ実機での動作まで含めて問題なく機能した（詳細は後述の「NFC実機への展開について」を参照）。
 
 ---
 
@@ -154,5 +179,6 @@ NFC実機運用では、タグを読んだ瞬間にOSがブラウザを新規に
 ## 既知の制限・今後の課題
 
 - prefix/suffixの境界も句読点区切りに対応させると、前後文脈オプションの成功率がさらに上がる見込み。
-- Safari実機での確認が未実施。
 - 「マッチ失敗時のフォールバック」（例: 見つからなければページ先頭にとどまるだけで無言で終わる）をUI側でユーザーに伝える仕組みが無い。実運用では検討が必要。
+- iOSショートカットの「Webページで JavaScript を実行」アクションが、ユーザーの実機で原因不明のまま機能しなかった（詳細は「iOSショートカット版」参照）。クリップボード経由の2段階方式で回避したが、根本原因は未解明のまま。
+- ブックマークレットからの `shortcuts://` 自動起動でメモに追記されるところまでは、実機での最終確認待ち。

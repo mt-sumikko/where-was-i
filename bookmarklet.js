@@ -94,25 +94,24 @@
   const mainText = extractMainText(fullText, 20);
   const url = location.origin + location.pathname + location.search + '#:~:text=' + encodeURIComponent(mainText);
 
-  // クリップボードコピーに加えて、対応環境ではOS標準の共有シートも開く。
-  // iOSの共有シートには「メモに追加」が標準搭載されているので、
-  // タップ一発でメモアプリに保存できる(キャンセルしてもコピー自体は残る)。
-  function tryShare() {
-    if (navigator.share) {
-      navigator.share({ title: 'しおり: ' + mainText, url: url }).catch(function () {});
-    }
+  // クリップボードコピーに加えて、iOSショートカット「しおりメモ保存」
+  // (クリップボードの内容を取得 → メモに追加、の2アクションだけ)を
+  // shortcuts:// URLスキームで自動起動する。これで共有シートを経由せず
+  // 決まったメモに無言で追記できる。ショートカット名を変えた場合は
+  // ここも合わせて変更すること。
+  var SHORTCUT_NAME = 'しおりメモ保存';
+  function runShortcut() {
+    location.href = 'shortcuts://run-shortcut?name=' + encodeURIComponent(SHORTCUT_NAME);
   }
 
   if (navigator.clipboard && navigator.clipboard.writeText) {
     navigator.clipboard.writeText(url).then(function () {
       showToast('しおりをコピーしました: 「' + mainText + '」');
-      tryShare();
+      runShortcut();
     }).catch(function () {
       window.prompt('自動コピーに失敗しました。手動でコピーしてください:', url);
-      tryShare();
     });
   } else {
     window.prompt('しおりURL(手動でコピーしてください):', url);
-    tryShare();
   }
 })();
