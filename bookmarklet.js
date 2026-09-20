@@ -99,9 +99,13 @@
   // shortcuts:// URLスキームで自動起動する。これで共有シートを経由せず
   // 決まったメモに無言で追記できる。ショートカット名を変えた場合は
   // ここも合わせて変更すること。
+  // x-success に元のページURLを渡すことで、ショートカット実行完了後に
+  // 自動でSafariの元のページへ戻る(切り替わりっぱなしにしない)。
   var SHORTCUT_NAME = 'しおりメモ保存';
   function runShortcut() {
-    location.href = 'shortcuts://run-shortcut?name=' + encodeURIComponent(SHORTCUT_NAME);
+    var returnUrl = location.href;
+    location.href = 'shortcuts://run-shortcut?name=' + encodeURIComponent(SHORTCUT_NAME) +
+      '&x-success=' + encodeURIComponent(returnUrl);
   }
 
   if (navigator.clipboard && navigator.clipboard.writeText) {
