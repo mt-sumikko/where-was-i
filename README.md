@@ -26,28 +26,64 @@ python3 -m http.server 8000
 
 `index.html` はこのリポジトリの中のページ専用（`#article` 配下だけを見る）だが、**`bookmarklet.js` は任意のWebページ上で「しおりを挟む」を実行できるブックマークレット版**。実際に読んでいるニュースサイトやブログの記事で試すにはこちらを使う。
 
-やること自体は同じ（ビューポート内で一番上に見えるテキストを取得→句読点区切りで切り詰め→`#:~:text=` URLを組み立て）だが、保存先が `localStorage` ではなく**クリップボードへの自動コピー**になっている（他人のページに自分の`localStorage`を書き込むわけにはいかないので）。コピー直後、`shortcuts://run-shortcut?name=しおりメモ保存` というURLスキームで**iOSショートカット「しおりメモ保存」を自動起動**し、クリップボードの中身を決まったメモに無言で追記する（詳細は後述の「iOSショートカット版」を参照）。「しおりを開く」側はブックマークレット不要で、保存したURLをそのまま開けばよい（NFCタグに書き込む・メモから開く・自分に送る、など）。
+やること自体は同じ（ビューポート内で一番上に見えるテキストを取得→句読点区切りで切り詰め→`#:~:text=` URLを組み立て）だが、保存方法が **自前のAPI（Cloudflare Workers + KV）への `fetch()` 直接送信** になっている。これが最終的に採用した方式で、経緯は後述の「iOSショートカット版」を参照（一度はショートカット経由の方式を作り込んだが、実機で複数の不具合に遭遇したため方針転換した）。クリップボードへのコピーは保険として残してある（API送信が失敗しても手動で貼り付けられるように）。「しおりを開く」側はブックマークレット不要で、保存したURLをそのまま開けばよい。
 
-### 登録方法
+### 事前準備: Cloudflare Workers APIをデプロイする
 
-1. `bookmarklet.js` の中身をコピーし、ブラウザで開発者コンソール等を使って圧縮する必要はない。以下の圧縮済みコードをそのまま使う：
+`worker/` ディレクトリに、しおりURLを保存するだけのシンプルなAPI（`POST /save`、`GET /list`）が入っている。KVストレージへの保存に固定トークンでの認証をかけただけの最小構成。
+
+**課金について:** Cloudflare Workers/KVには無料枠があり（Workers: 1日10万リクエストまで、KV書き込み: 1日1,000回まで）、個人のしおり保存用途ではまず届かない規模。**一番確実な安全策は、Cloudflareアカウントに支払い方法(クレジットカード)を登録しないこと**。無料プランの利用に支払い方法の登録は不要なので、登録しなければ物理的に課金されようがない。ダッシュボードに出てくる「Upgrade」的な誘導ボタンは押さないこと。
+
+デプロイ手順（要 Node.js。ローカルのMacで実行）:
+
+```bash
+cd worker
+npm install -g wrangler   # 未インストールの場合のみ
+wrangler login             # ブラウザが開くのでCloudflareアカウントでログイン
+
+# KVネームスペースを作成(表示されたidをwrangler.tomlのidに書き込む)
+wrangler kv namespace create BOOKMARKS
+
+# 認証トークンを生成してCloudflare側にのみ保存(このコマンドではコード
+# やリポジトリには一切残らない。プロンプトが出たら生成した文字列を貼り付け)
+openssl rand -hex 32
+wrangler secret put AUTH_TOKEN
+
+# デプロイ
+wrangler deploy
+```
+
+デプロイが成功すると `https://where-was-i-api.<あなたのsubdomain>.workers.dev` のようなURLが表示される。これと、`wrangler secret put` で設定したトークンの2つを次のステップで使う。
+
+### ブックマークレットの登録方法
+
+1. 以下の圧縮済みコードをコピーし、その中の **`YOUR_WORKER_SUBDOMAIN` を実際のWorkerのサブドメインに、`YOUR_AUTH_TOKEN` を生成した実トークンに置き換える**（テキストエディタの検索置換で2箇所直すだけでよい。JSを書く必要はない）：
 
 ```
-javascript:(function(){function normalize(text){return text.replace(/\s+/g,' ').trim();}function extractMainText(fullText,maxLength){const slice = fullText.slice(0,maxLength);const lastPunct = Math.max(slice.lastIndexOf('。'),slice.lastIndexOf('、'),slice.lastIndexOf('！'),slice.lastIndexOf('？'),slice.lastIndexOf('.'),slice.lastIndexOf(','));if(lastPunct >= 3)return slice.slice(0,lastPunct + 1);return slice;}function isHidden(el){if(!el)return false;const style = getComputedStyle(el);return style.display === 'none' || style.visibility === 'hidden' || parseFloat(style.opacity)=== 0;}function findTopVisibleTextNode(){const walker = document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT,{acceptNode(node){if(!node.textContent || !normalize(node.textContent))return NodeFilter.FILTER_REJECT;const parent = node.parentElement;if(!parent)return NodeFilter.FILTER_REJECT;const tag = parent.tagName;if(tag === 'SCRIPT' || tag === 'STYLE' || tag === 'NOSCRIPT')return NodeFilter.FILTER_REJECT;if(isHidden(parent))return NodeFilter.FILTER_REJECT;return NodeFilter.FILTER_ACCEPT;}});let best = null;let bestTop = Infinity;let node;while((node = walker.nextNode())){const range = document.createRange();range.selectNodeContents(node);const rects = range.getClientRects();for(const rect of rects){if(rect.height > 0 && rect.bottom > 0 && rect.top < window.innerHeight){if(rect.top < bestTop){bestTop = rect.top;best = node;}break;}}}return best;}function showToast(msg,isError){const el = document.createElement('div');el.textContent = msg;el.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);' + 'background:' +(isError ? '#dc2626':'#111827')+ ';color:#fff;' + 'padding:10px 16px;border-radius:8px;font-size:14px;line-height:1.5;' + 'z-index:2147483647;box-shadow:0 4px 16px rgba(0,0,0,.35);' + 'max-width:min(90vw,480px);word-break:break-all;font-family:sans-serif;';document.body.appendChild(el);setTimeout(function(){el.remove();},4000);}const node = findTopVisibleTextNode();if(!node){showToast('しおり:ビューポート内にテキストが見つかりませんでした',true);return;}const fullText = normalize(node.textContent);const mainText = extractMainText(fullText,20);const url = location.origin + location.pathname + location.search + '#:~:text=' + encodeURIComponent(mainText);var SHORTCUT_NAME = 'しおりメモ保存';function runShortcut(){location.href = 'shortcuts://run-shortcut?name=' + encodeURIComponent(SHORTCUT_NAME)+ '&x-success=' + encodeURIComponent('x-safari-' + url);}if(navigator.clipboard && navigator.clipboard.writeText){navigator.clipboard.writeText(url).then(function(){showToast('しおりをコピーしました:「' + mainText + '」');runShortcut();}).catch(function(){window.prompt('自動コピーに失敗しました。手動でコピーしてください:',url);});}else{window.prompt('しおりURL(手動でコピーしてください):',url);}})();
+javascript:(function(){function normalize(text){return text.replace(/\s+/g,' ').trim();}function extractMainText(fullText,maxLength){const slice = fullText.slice(0,maxLength);const lastPunct = Math.max(slice.lastIndexOf('。'),slice.lastIndexOf('、'),slice.lastIndexOf('！'),slice.lastIndexOf('？'),slice.lastIndexOf('.'),slice.lastIndexOf(','));if(lastPunct >= 3)return slice.slice(0,lastPunct + 1);return slice;}function isHidden(el){if(!el)return false;const style = getComputedStyle(el);return style.display === 'none' || style.visibility === 'hidden' || parseFloat(style.opacity)=== 0;}function findTopVisibleTextNode(){const walker = document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT,{acceptNode(node){if(!node.textContent || !normalize(node.textContent))return NodeFilter.FILTER_REJECT;const parent = node.parentElement;if(!parent)return NodeFilter.FILTER_REJECT;const tag = parent.tagName;if(tag === 'SCRIPT' || tag === 'STYLE' || tag === 'NOSCRIPT')return NodeFilter.FILTER_REJECT;if(isHidden(parent))return NodeFilter.FILTER_REJECT;return NodeFilter.FILTER_ACCEPT;}});let best = null;let bestTop = Infinity;let node;while((node = walker.nextNode())){const range = document.createRange();range.selectNodeContents(node);const rects = range.getClientRects();for(const rect of rects){if(rect.height > 0 && rect.bottom > 0 && rect.top < window.innerHeight){if(rect.top < bestTop){bestTop = rect.top;best = node;}break;}}}return best;}function showToast(msg,isError){const el = document.createElement('div');el.textContent = msg;el.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);' + 'background:' +(isError ? '#dc2626':'#111827')+ ';color:#fff;' + 'padding:10px 16px;border-radius:8px;font-size:14px;line-height:1.5;' + 'z-index:2147483647;box-shadow:0 4px 16px rgba(0,0,0,.35);' + 'max-width:min(90vw,480px);word-break:break-all;font-family:sans-serif;';document.body.appendChild(el);setTimeout(function(){el.remove();},4000);}const node = findTopVisibleTextNode();if(!node){showToast('しおり:ビューポート内にテキストが見つかりませんでした',true);return;}const fullText = normalize(node.textContent);const mainText = extractMainText(fullText,20);const url = location.origin + location.pathname + location.search + '#:~:text=' + encodeURIComponent(mainText);if(navigator.clipboard && navigator.clipboard.writeText){navigator.clipboard.writeText(url).catch(function(){});}var API_URL = 'https://YOUR_WORKER_SUBDOMAIN.workers.dev/save';var AUTH_TOKEN = 'YOUR_AUTH_TOKEN';fetch(API_URL,{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Token':AUTH_TOKEN},body:JSON.stringify({url:url}),}).then(function(res){if(res.ok){showToast('しおりを保存しました:「' + mainText + '」');}else{showToast('保存に失敗しました(' + res.status + ')。URLはクリップボードにあります',true);}}).catch(function(){showToast('保存に失敗しました(通信エラー)。URLはクリップボードにあります',true);});})();
 ```
 
-2. **Mac (Safari/Chrome)**: 適当なページをブックマークに追加 → ブックマーク編集画面を開き、URL欄を上記の `javascript:...` に丸ごと置き換える → 名前を「しおりを挟む」などにしておく。
-3. **iPhone Safari**: 同様にまず普通にブックマークを1つ追加 → ブックマーク一覧の編集モードでそのブックマークを開き、URL欄を `javascript:...` に置き換える。
-4. あらかじめ後述の「iOSショートカット版」の手順で、ショートカット「しおりメモ保存」を作っておく。
-5. 実際に読みたいページを開いた状態で、ブックマークバー（またはブックマーク一覧）からこれを実行すると、画面下に「しおりをコピーしました: 「〇〇〇」」とトースト表示が出てtext fragment URLがクリップボードに入り、続けて自動でショートカットアプリが起動してメモに追記される。
+（このコード自体はプレースホルダーのままなので公開リポジトリに載せても安全。**実際のトークンに置き換えた後のコードは、自分のブックマークにだけ貼り、どこにもコミット・共有しないこと**）
+
+2. **Mac (Safari/Chrome)**: 適当なページをブックマークに追加 → ブックマーク編集画面を開き、URL欄を書き換え後の `javascript:...` に丸ごと置き換える → 名前を「しおりを挟む」などにしておく。
+3. **iPhone Safari**: 同様にまず普通にブックマークを1つ追加 → ブックマーク一覧の編集モードでそのブックマークを開き、URL欄を置き換える。
+4. 実際に読みたいページを開いた状態でブックマークを実行すると、画面下に「しおりを保存しました: 「〇〇〇」」とトースト表示が出るだけで完了。**画面遷移や他アプリの起動は一切発生しない。**
+
+保存済みの一覧は `GET https://<WorkerのURL>/list?token=<AUTH_TOKEN>` にブラウザでアクセスすれば見られる（JSON形式）。専用の閲覧ページが欲しければ別途作る余地あり。
+
+### 動作確認の状況
+
+`worker/index.js` のロジックはNode.js上でKVをモックしたユニットテストで検証済み（認証あり/なしの分岐、必須項目チェック、CORSプリフライトなど10ケース）。ブックマークレット側のtext fragment生成ロジックは、`index.html` とは全く違うDOM構造（ヘッダー・ナビ・サイドバー広告・広告差し込みのある記事本文）を持つダミーニュースサイト風ページで検証済み。`fetch()` での実際の送信・保存・一覧取得まで含めた実機での最終確認はユーザー側で必要。
 
 ### ダミーニュースサイトでの検証
 
-`index.html` とは全く違うDOM構造（ヘッダー・ナビ・サイドバー広告・広告差し込みのある記事本文）を持つダミーのニュースサイト風ページを別途用意し、Playwrightでブックマークレットを注入して検証した。ヘッダーやサイドバー広告のテキストを誤って拾うことなく、記事本文中のビューポート最上部のテキストを正しく抽出し、クリップボードへのコピーまでは問題なく機能することを確認済み（`shortcuts://` へのカスタムスキーム遷移自体はheadless環境では検証できないため、そこから先はユーザー側での実機確認が必要）。
+`index.html` とは全く違うDOM構造（ヘッダー・ナビ・サイドバー広告・広告差し込みのある記事本文）を持つダミーのニュースサイト風ページを別途用意し、Playwrightでブックマークレットを注入して検証した。ヘッダーやサイドバー広告のテキストを誤って拾うことなく、記事本文中のビューポート最上部のテキストを正しく抽出できることを確認済み。
 
-## iOSショートカット版（共有シートを経由せず特定のメモへ自動保存）
+## iOSショートカット版（過去の試行錯誤の記録 — 最終的にはAPI直送方式に移行）
 
-共有シートは結局「保存先を毎回選ぶ」手間が残り、普通の記事共有と体験が変わらない。**決まった1つのメモに無言で追記したい場合は、ブックマークレットではなくiOSショートカットに主導権を渡すのが確実。**
+**この節は最終的に不採用になった方式の記録。** 現在の推奨は上の「ブックマークレット版」(Cloudflare Workers APIへの直接送信)。ここに残しているのは、同じ問題（iOSショートカットの不可解な不具合、x-callback-urlの罠）に当たった人の参考用。
+
+共有シートは結局「保存先を毎回選ぶ」手間が残り、普通の記事共有と体験が変わらない。当初は**決まった1つのメモに無言で追記したい場合は、ブックマークレットではなくiOSショートカットに主導権を渡すのが確実**という判断で、この方式を作り込んでいた。
 
 ### 実機検証で判明した重大な制約：「Webページで JavaScript を実行」が機能しないケースがある
 
@@ -89,7 +125,7 @@ Safari関連のアクションは一切使わない、以下の2アクション�
 
 `shortcuts://` への遷移自体はカスタムURLスキームなのでheadless環境では検証できないが、その手前のクリップボードコピー部分はPlaywrightで動作確認済み。
 
-#### 実機確認：完全に動作した
+#### 実機確認：メモへの保存までは動作した
 
 ユーザーの実機(iPhone)で、実際に外部サイト(anthropic.comの記事ページ)を開いた状態でブックマークレットを実行したところ、
 
@@ -99,11 +135,22 @@ Safari関連のアクションは一切使わない、以下の2アクション�
 4. 「しおりメモ保存」ショートカットが実行される
 5. **対象メモ「Web しおり Where was i」に、正しいtext fragment URL（`https://www.anthropic.com/engineering/...#:~:text=The%20Claude%20Agent%20SDK`）が追記される**
 
-まで、一連の流れが最後まで動作することを確認済み。「Webページで JavaScript を実行」を経由しない設計に切り替えたことで、この環境固有の不具合を完全に回避できた。
+まで、一連の流れが動作することを確認できた。「Webページで JavaScript を実行」を経由しない設計に切り替えたことで、この環境固有の不具合は完全に回避できた。
 
 なお、`しおりメモ保存` ショートカット内でも「クリップボードを取得」の出力をそのまま「メモに追加」に渡すと同じ型変換の問題（メモの更新日時だけ進み、中身が空のまま）が再発した。ここでも「テキスト」アクションでクリップボードの内容を一度明示的に固定してから「メモに追加」に渡すことで回避できた。`bookmarklet.js`側の「Webページで JavaScript を実行」の一件と合わせて、**iOSショートカットでは「他アプリ由来の値をアクションに直接渡すと空になる」系の型変換の不具合に何度か遭遇した**。同様の問題に当たった場合は、間に「テキスト」アクションを一つ挟んで値を固定するのが有効な回避策になりそう。
 
 唯一の細かい注意点として、メモアプリの自動リンク検出が `#:~:text=` を含む長いURLをリンク化してくれない（プレーンテキストのまま保存される）ことがある。実害は小さく、テキストとしては正確に保存されているので、選択してコピー→Safariに貼り付ければ問題なく開ける。
+
+#### UX上の指摘と、`x-success` を巡る一連の不具合（最終的に不採用の決め手）
+
+「メモへの保存」自体は動いたが、**ユーザーから「ショートカットアプリに切り替わったまま」という体験の悪さを指摘された。** これを解消するため `x-success`（x-callback-urlの、ショートカット完了後に指定URLへ自動で戻る仕組み）を導入する過程で、以下の不具合に次々と遭遇した：
+
+1. **既定ブラウザがChrome等だと `x-success` の戻り先もChromeで開かれる。** `x-success` は単に「このURLを開いて」という汎用的な仕組みで、Safari限定ではなく端末の既定ブラウザに従う。`x-safari-https://...` という非公式に広まったプレフィックスで回避を試みた。
+2. **`x-success` に渡すURLを実装ミスで `location.href`（フラグメントなしのプレーンなURL）にしていた**ため、そもそもしおり位置が再現されていなかった。text fragment付きの `url` 変数に修正。
+3. `x-safari-` を付けても付けなくても、戻り先のページが**真っ白になる、あるいはトップページで開かれる**現象が発生。実際にアドレスバーのURLを確認してもらったところ、**ショートカットの最後のアクション「停止して[追加されたメモ]を出力」の出力(メモの中身まるごと)が `?result=...` として戻り先URLに自動付加されており、しかもテスト実行を重ねるたびに雪だるま式にネストして肥大化していた**ことが判明。x-callback-urlの仕様で、ショートカットの最終出力は自動的に戻り先URLへ付加される。
+4. この「停止して出力」アクションを消しても、**ショートカットの実行許可が「常に許可」になっていると自動的に復活する**（「一度だけ」に戻すと復活しないが、その場合は毎回確認ダイアログが挟まり「ワンタッチで保存」という体験が崩れる）ことが分かった。
+
+ここまでの切り分けで、`x-success` を使う限り「決め打ちの許可設定」と「勝手に付加されるresultパラメータ」の組み合わせを制御しきれないという結論に至り、**iOSショートカットへの依存自体をやめて、`fetch()` で自前APIに直接送信する方式（上の「ブックマークレット版」）に切り替えた。** 画面遷移が原理的に発生しないため、x-callback-url周りの不具合は全て回避できる。
 
 ### NFCタグが手元にない時のトリガー代替手段
 
@@ -200,5 +247,6 @@ NFC実機運用では、タグを読んだ瞬間にOSがブラウザを新規に
 
 - prefix/suffixの境界も句読点区切りに対応させると、前後文脈オプションの成功率がさらに上がる見込み。
 - 「マッチ失敗時のフォールバック」（例: 見つからなければページ先頭にとどまるだけで無言で終わる）をUI側でユーザーに伝える仕組みが無い。実運用では検討が必要。
-- iOSショートカットの「Webページで JavaScript を実行」アクションが、ユーザーの実機で原因不明のまま機能しなかった（詳細は「iOSショートカット版」参照）。クリップボード経由の2段階方式（ブックマークレット + `shortcuts://` 自動起動 + シンプルなショートカット）に切り替えたところ実機で完全動作した。根本原因は未解明のままだが、実用上の回避策は確立できた。
-- メモアプリの自動リンク検出が `#:~:text=` を含む長いURLをリンク化しない（プレーンテキストとして保存される）。実害は小さい（テキストとしては正確に保存される）が、気になるなら改善の余地あり。
+- iOSショートカット方式は、「Webページで JavaScript を実行」アクションの原因不明の不具合、x-callback-urlの `x-success` を巡る複数の不具合（既定ブラウザの問題、実装ミス、ショートカットの出力がURLに自動付加される問題、許可設定による挙動差）に次々と遭遇し、最終的に不採用にした（詳細は「iOSショートカット版」参照）。現在は `fetch()` で自前のCloudflare Workers APIに直接送信する方式（「ブックマークレット版」参照）に移行済み。この方式なら画面遷移自体が発生しないため、これらの不具合は原理的に起こらない。
+- `worker/index.js` はNode.js上でのユニットテスト（KVをモック）のみ実施済み。実際のCloudflareへのデプロイ、およびブックマークレットからの `fetch()` 送信〜メモに相当する保存〜一覧取得までの一気通貫の実機確認はユーザー側で必要。
+- メモアプリの自動リンク検出が `#:~:text=` を含む長いURLをリンク化しない（プレーンテキストとして保存される）という問題は、iOSショートカット方式（メモアプリに保存）特有の話だったため、API直送方式では該当しなくなった（保存先が自前のKVストレージになったため）。

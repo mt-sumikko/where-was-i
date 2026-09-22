@@ -1,0 +1,10 @@
+name = "where-was-i-api"
+main = "index.js"
+compatibility_date = "2024-01-01"
+
+# KVネームスペースのIDは `wrangler kv namespace create BOOKMARKS` を実行すると
+# 発行される。発行されたIDをここに書き込む(IDはただの識別子で秘密情報では
+# ないためコミットしてよい。AUTH_TOKENの方は絶対にここに書かないこと)。
+kv_namespaces = [
+  { binding = "BOOKMARKS", id = "REPLACE_WITH_YOUR_KV_NAMESPACE_ID" }
+]

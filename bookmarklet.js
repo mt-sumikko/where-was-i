@@ -4,11 +4,18 @@
  * index.html は自分自身のページ専用(#article配下だけを走査)だが、
  * こちらはブックマークバーに登録して任意のWebページ上で実行する版。
  * document.body全体を対象に、ビューポート内で一番上に見えるテキストから
- * text fragment URL(#:~:text=...)を組み立て、クリップボードにコピーする。
+ * text fragment URL(#:~:text=...)を組み立て、自前のCloudflare Workers API
+ * (worker/index.js)にfetch()で直接送信する。画面遷移や他アプリの起動を
+ * 一切挟まないため、iOSショートカット経由で繰り返し遭遇した不具合
+ * (詳細はREADMEの「iOSショートカット版」参照)を回避できる。
  *
- * 使い方: このファイルの内容を圧縮して "javascript:(function(){...})();"
- * という1行のURLにし、ブラウザのブックマークのURL欄に登録する。
- * (圧縮済みのものは README.md に掲載)
+ * 使い方:
+ *   1. worker/README等の手順でCloudflare Workers APIをデプロイする
+ *   2. このファイル内の API_URL と AUTH_TOKEN を自分の環境の値に書き換える
+ *   3. 内容を圧縮して "javascript:(function(){...})();" という1行のURLにし、
+ *      ブラウザのブックマークのURL欄に登録する
+ *   (圧縮済みのものは README.md に掲載。ただし API_URL/AUTH_TOKEN は
+ *   プレースホルダーのままなので、貼り付けた後に必ず書き換えること)
  */
 (function () {
   function normalize(text) {
@@ -94,30 +101,36 @@
   const mainText = extractMainText(fullText, 20);
   const url = location.origin + location.pathname + location.search + '#:~:text=' + encodeURIComponent(mainText);
 
-  // クリップボードコピーに加えて、iOSショートカット「しおりメモ保存」
-  // (クリップボードの内容を取得 → メモに追加、の2アクションだけ)を
-  // shortcuts:// URLスキームで自動起動する。これで共有シートを経由せず
-  // 決まったメモに無言で追記できる。ショートカット名を変えた場合は
-  // ここも合わせて変更すること。
-  // x-success には、しおり位置を示すtext fragment付きURL(url変数、
-  // location.hrefではない)を渡す。さらに先頭に x-safari- を付けることで、
-  // 既定のブラウザがChrome等に設定されていてもSafariで強制的に開かせる
-  // (付けないと既定ブラウザで開かれ、しおり位置が再現されないだけでなく
-  // 別ブラウザに切り替わってしまう)。
-  var SHORTCUT_NAME = 'しおりメモ保存';
-  function runShortcut() {
-    location.href = 'shortcuts://run-shortcut?name=' + encodeURIComponent(SHORTCUT_NAME) +
-      '&x-success=' + encodeURIComponent('x-safari-' + url);
+  // クリップボードコピーは保険として残す(API送信が失敗した場合に、
+  // 手動で貼り付けられるようにするため)。
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(url).catch(function () {});
   }
 
-  if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(url).then(function () {
-      showToast('しおりをコピーしました: 「' + mainText + '」');
-      runShortcut();
-    }).catch(function () {
-      window.prompt('自動コピーに失敗しました。手動でコピーしてください:', url);
-    });
-  } else {
-    window.prompt('しおりURL(手動でコピーしてください):', url);
-  }
+  // Cloudflare Workers上の自前APIにfetch()で直接送信する。iOSショートカット
+  // (shortcuts:// URLスキーム)経由の方式は、実機で「Webページで JavaScript
+  // を実行」自体が機能しない不具合や、x-success経由でSafariに戻る際に
+  // ショートカットの出力が勝手にURLへ付加されて壊れる不具合に繰り返し
+  // 遭遇し、安定運用できなかった。fetch()は画面遷移を一切挟まないため、
+  // その種の不具合が原理的に起こらない。
+  //
+  // 使う前に、以下2つを自分の環境の値に書き換えること:
+  //   API_URL: `wrangler deploy` 後に発行されるWorkerのURL + "/save"
+  //   AUTH_TOKEN: `wrangler secret put AUTH_TOKEN` で設定したのと同じ値
+  var API_URL = 'https://YOUR_WORKER_SUBDOMAIN.workers.dev/save';
+  var AUTH_TOKEN = 'YOUR_AUTH_TOKEN';
+
+  fetch(API_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Auth-Token': AUTH_TOKEN },
+    body: JSON.stringify({ url: url }),
+  }).then(function (res) {
+    if (res.ok) {
+      showToast('しおりを保存しました: 「' + mainText + '」');
+    } else {
+      showToast('保存に失敗しました(' + res.status + ')。URLはクリップボードにあります', true);
+    }
+  }).catch(function () {
+    showToast('保存に失敗しました(通信エラー)。URLはクリップボードにあります', true);
+  });
 })();
