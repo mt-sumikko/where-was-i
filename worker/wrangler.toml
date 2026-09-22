@@ -6,5 +6,5 @@ compatibility_date = "2024-01-01"
 # 発行される。発行されたIDをここに書き込む(IDはただの識別子で秘密情報では
 # ないためコミットしてよい。AUTH_TOKENの方は絶対にここに書かないこと)。
 kv_namespaces = [
-  { binding = "BOOKMARKS", id = "REPLACE_WITH_YOUR_KV_NAMESPACE_ID" }
+  { binding = "BOOKMARKS", id = "1ead39d3b04845aa86782d6d45412f66" }
 ]
