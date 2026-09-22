@@ -26,6 +26,23 @@ function json(data, status) {
   });
 }
 
+// トークン全体を晒さずに済むよう、先頭/末尾数文字だけ見せる
+function preview(t) {
+  if (!t) return null;
+  if (t.length <= 12) return '*'.repeat(t.length);
+  return t.slice(0, 6) + '...' + t.slice(-6);
+}
+
+// 2つの文字列を比較し、最初に食い違う位置のインデックスを返す(一致ならnull)
+function firstDiffIndex(a, b) {
+  if (a == null || b == null) return -1;
+  const len = Math.max(a.length, b.length);
+  for (let i = 0; i < len; i++) {
+    if (a[i] !== b[i]) return i;
+  }
+  return null;
+}
+
 function isAuthorized(request, url, env) {
   const headerToken = request.headers.get('X-Auth-Token');
   const queryToken = url.searchParams.get('token');
@@ -34,7 +51,9 @@ function isAuthorized(request, url, env) {
   console.log('DEBUG auth check', {
     receivedLength: token ? token.length : null,
     expectedLength: env.AUTH_TOKEN ? env.AUTH_TOKEN.length : null,
-    receivedJSON: JSON.stringify(token),
+    receivedPreview: preview(token),
+    expectedPreview: preview(env.AUTH_TOKEN),
+    firstDiffIndex: firstDiffIndex(token, env.AUTH_TOKEN),
     match: token === env.AUTH_TOKEN,
   });
   return !!env.AUTH_TOKEN && token === env.AUTH_TOKEN;
