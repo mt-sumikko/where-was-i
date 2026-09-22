@@ -30,6 +30,13 @@ function isAuthorized(request, url, env) {
   const headerToken = request.headers.get('X-Auth-Token');
   const queryToken = url.searchParams.get('token');
   const token = headerToken || queryToken;
+  // DEBUG: トークン不一致の原因切り分け用。原因が分かったら削除すること。
+  console.log('DEBUG auth check', {
+    receivedLength: token ? token.length : null,
+    expectedLength: env.AUTH_TOKEN ? env.AUTH_TOKEN.length : null,
+    receivedJSON: JSON.stringify(token),
+    match: token === env.AUTH_TOKEN,
+  });
   return !!env.AUTH_TOKEN && token === env.AUTH_TOKEN;
 }
 
