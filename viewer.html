@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>しおり一覧 - where was i</title>
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", sans-serif;
+    max-width: 640px;
+    margin: 0 auto;
+    padding: 24px 16px 64px;
+    background: #f9fafb;
+    color: #111827;
+  }
+  h1 { font-size: 20px; margin-bottom: 4px; }
+  p.desc { color: #6b7280; font-size: 13px; margin-top: 0; }
+
+  .setup {
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 12px;
+    padding: 16px;
+    margin-bottom: 20px;
+  }
+  .setup label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 6px; }
+  .setup input {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 10px 12px;
+    border: 1px solid #d1d5db;
+    border-radius: 8px;
+    font-size: 14px;
+    margin-bottom: 10px;
+  }
+  .setup button, .reload button {
+    background: #111827;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    padding: 10px 16px;
+    font-size: 14px;
+    cursor: pointer;
+  }
+  .setup .hint { font-size: 12px; color: #9ca3af; margin: -4px 0 10px; }
+
+  .toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+  .toolbar button {
+    background: #fff;
+    border: 1px solid #d1d5db;
+    border-radius: 8px;
+    padding: 8px 14px;
+    font-size: 13px;
+    cursor: pointer;
+  }
+
+  ul.list { list-style: none; padding: 0; margin: 0; }
+  li.item {
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 12px;
+    padding: 14px 16px;
+    margin-bottom: 10px;
+  }
+  li.item a {
+    color: #111827;
+    text-decoration: none;
+    font-size: 15px;
+    line-height: 1.5;
+    display: block;
+    word-break: break-all;
+  }
+  li.item a:hover { text-decoration: underline; }
+  li.item .meta {
+    font-size: 12px;
+    color: #9ca3af;
+    margin-top: 6px;
+  }
+
+  .empty, .error {
+    text-align: center;
+    color: #6b7280;
+    padding: 32px 0;
+    font-size: 14px;
+  }
+  .error { color: #dc2626; }
+
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+
+<h1>しおり一覧</h1>
+<p class="desc">Cloudflare Workers API (worker/index.js) に保存されたしおりを表示します</p>
+
+<div class="setup" id="setup">
+  <label for="apiUrl">API URL</label>
+  <input id="apiUrl" type="text" placeholder="https://your-worker-subdomain.workers.dev">
+  <label for="authToken">AUTH_TOKEN</label>
+  <input id="authToken" type="password" placeholder="wrangler secret put で設定したトークン">
+  <p class="hint">ここに入れた値はこの端末のブラウザ内(localStorage)にだけ保存され、コードやリポジトリには一切含まれません。</p>
+  <button id="saveSetup">保存して読み込む</button>
+</div>
+
+<div class="toolbar hidden" id="toolbar">
+  <button id="reload">再読み込み</button>
+  <button id="editSetup">設定を変更</button>
+</div>
+
+<div id="result"></div>
+
+<script>
+(function () {
+  var setupEl = document.getElementById('setup');
+  var toolbarEl = document.getElementById('toolbar');
+  var resultEl = document.getElementById('result');
+  var apiUrlInput = document.getElementById('apiUrl');
+  var authTokenInput = document.getElementById('authToken');
+
+  function getConfig() {
+    return {
+      apiUrl: localStorage.getItem('wwi_api_url') || '',
+      authToken: localStorage.getItem('wwi_auth_token') || '',
+    };
+  }
+
+  function saveConfig(apiUrl, authToken) {
+    localStorage.setItem('wwi_api_url', apiUrl);
+    localStorage.setItem('wwi_auth_token', authToken);
+  }
+
+  function showSetup() {
+    var cfg = getConfig();
+    apiUrlInput.value = cfg.apiUrl;
+    authTokenInput.value = cfg.authToken;
+    setupEl.classList.remove('hidden');
+    toolbarEl.classList.add('hidden');
+    resultEl.innerHTML = '';
+  }
+
+  function showList() {
+    setupEl.classList.add('hidden');
+    toolbarEl.classList.remove('hidden');
+    load();
+  }
+
+  function formatDate(iso) {
+    try {
+      var d = new Date(iso);
+      return d.toLocaleString('ja-JP');
+    } catch (e) {
+      return iso;
+    }
+  }
+
+  function load() {
+    var cfg = getConfig();
+    if (!cfg.apiUrl || !cfg.authToken) {
+      showSetup();
+      return;
+    }
+    resultEl.innerHTML = '<div class="empty">読み込み中...</div>';
+    var base = cfg.apiUrl.replace(/\/$/, '');
+    fetch(base + '/list?token=' + encodeURIComponent(cfg.authToken))
+      .then(function (res) {
+        if (!res.ok) throw new Error('status ' + res.status);
+        return res.json();
+      })
+      .then(function (items) {
+        if (!items.length) {
+          resultEl.innerHTML = '<div class="empty">まだしおりが保存されていません</div>';
+          return;
+        }
+        var ul = document.createElement('ul');
+        ul.className = 'list';
+        items.forEach(function (item) {
+          var li = document.createElement('li');
+          li.className = 'item';
+          var a = document.createElement('a');
+          a.href = item.url;
+          a.target = '_blank';
+          a.rel = 'noopener';
+          a.textContent = decodeURIComponent(item.url.split('#:~:text=')[1] || item.url);
+          var meta = document.createElement('div');
+          meta.className = 'meta';
+          meta.textContent = formatDate(item.savedAt);
+          li.appendChild(a);
+          li.appendChild(meta);
+          ul.appendChild(li);
+        });
+        resultEl.innerHTML = '';
+        resultEl.appendChild(ul);
+      })
+      .catch(function (err) {
+        resultEl.innerHTML = '<div class="error">読み込みに失敗しました(' + err.message + ')。API URL / トークンを確認してください</div>';
+      });
+  }
+
+  document.getElementById('saveSetup').addEventListener('click', function () {
+    var apiUrl = apiUrlInput.value.trim();
+    var authToken = authTokenInput.value.trim();
+    if (!apiUrl || !authToken) return;
+    saveConfig(apiUrl, authToken);
+    showList();
+  });
+
+  document.getElementById('reload').addEventListener('click', load);
+  document.getElementById('editSetup').addEventListener('click', showSetup);
+
+  var cfg = getConfig();
+  if (cfg.apiUrl && cfg.authToken) {
+    showList();
+  } else {
+    showSetup();
+  }
+})();
+</script>
+
+</body>
+</html>
